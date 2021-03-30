@@ -23,7 +23,7 @@ class Block:
         self.miner_rewards = miner_rewards
 
 
-class Blockchain:
+class BlockChain:
     def __init__(self):
         self.adjust_difficulty_blocks = 100  # adjust difficulty after how many blocks
         self.difficulty = 5
@@ -95,4 +95,61 @@ class Blockchain:
         print(f"Hash found: {new_block.hash} @ difficulty {self.difficulty}, time cost: {time_consumed}s")
         self.chain.append(new_block)
 
+    def adjust_difficulty(self):
+        if len(self.chain) % self.adjust_difficulty_blocks != 0:
+            return self.difficulty
+        elif len(self.chain) <= self.adjust_difficulty_blocks:
+            return self.difficulty
+        else:
+            start = self.chain[-1 * self.adjust_difficulty_blocks - 1].timestamp
+            finish = self.chain[-1].timestamp
+            average_time_consumed = round((finish - start) / (self.adjust_difficulty_blocks), 2)
+            if average_time_consumed > self.block_time:
+                print("Average block time: {average_time_consumed}s. Lower the difficulty")
+                self.difficulty -= 1
+            else:
+                print("Average block time: {average_time_consumed}s. High up the difficulty")
+                self.difficulty += 1
 
+    def get_balance(self, account):
+        balance = 0
+        for block in self.chain:
+            # Check miner reward
+            miner = False
+            if block.miner == account:
+                miner = True
+                balance += block.miner_rewards
+            for transaction in block.transacstions:
+                if miner:
+                    balance += transaction.fee
+                if transaction.sender == account:
+                    balance -= transaction.amounts
+                    balance -= transaction.fee
+                elif transaction.receiver == account:
+                    balance += transaction.amounts
+        return balance
+
+    def verify_blockchain(self):
+        previous_hash = ""
+        for idx, block in enumerate(self.chain):
+            if self.get_hash(block, block.nonce) != block.hash:
+                print("Error: Hash not matched!")
+                return False
+            elif previous_hash != block.previous_hash and idx:
+                print("Error: Hash not matched to previous_hash")
+                return False
+            previous_hash = block.hash
+        print("Hash correct!")
+        return True
+
+
+if __name__ == '__main__':
+    block = BlockChain()
+    block.create_genesis_block()
+    block.mine_block('lkm543')
+    block.verify_blockchain()
+    print("Insert fake transaction.")
+    fake_transaction = Transaction('test123', 'address', 100, 1, 'Test')
+    block.chain[1].transactions.append(fake_transaction)
+    block.mine_block('lkm543')
+    block.verify_blockchain()
