@@ -1,6 +1,10 @@
 import time
 import hashlib
 import rsa
+import socket
+import sys
+import threading
+import pickle
 
 
 class Transaction:
@@ -33,14 +37,66 @@ class BlockChain:
         self.block_limitation = 10
         self.chain = []
         self.pending_transactions = []
+        # For P2P connection
+        self.socket_host = "127.0.0.1"
+        self.socket_port = int(sys.argv[1])
+        self.start_socket_server()
+
+    def start_socket_server(self):
+        t = threading.Thread(target=self.wait_for_socket_connection)
+        t.start()
+
+    def wait_for_socket_connection(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((self.socket_host, self.socket_port))
+            s.listen()
+            while True:
+                conn, address = s.accept()
+                client_handler = threading.Thread(target=self.receive_socket_message, args=(conn, address))
+                client_handler.start()
+
+    def receive_socket_message(self, connection, address):
+        with connection:
+            print(f'Connected by: {address}')
+            while True:
+                message = connection.recv(1024)
+                print(f"[*] Received: {message}")
+                try:
+                    parsed_message = pickle.loads(message)
+                except Exception:
+                    print(f"{message} cannot be parsed")
+                if message:
+                    print(parsed_message)
+                    if parsed_message["request"] == "get_balance":
+                        print("Start to get the balance for client...")
+                        address = parsed_message["address"]
+                        balance = self.get_balance(address)
+                        response = {
+                            "address": address,
+                            "balance": balance,
+                        }
+                    elif parsed_message["request"] == "transaction":
+                        print("Start to transaction for client...")
+                        new_transaction = parsed_message["data"]
+                        result, result_message = self.add_transaction(new_transaction, parsed_message["signature"])
+                        response = {
+                            "result": result,
+                            "result_message": result_message,
+                        }
+                    else:
+                        response = {
+                            "message":  "Unknown command.",
+                        }
+                    response_bytes = str(response).encode("utf-8")
+                    connection.sendall(response_bytes)
 
     def transaction_to_string(self, transaction):
         transaction_dict = {
             "sender": str(transaction.sender),
             "receiver": str(transaction.receiver),
-            "amounts": str(transaction.amounts),
-            "fee": str(transaction.fee),
-            "message": str(transaction.message),
+            "amounts": transaction.amounts,
+            "fee": transaction.fee,
+            "message": transaction.message,
         }
         return str(transaction_dict)
 
@@ -171,11 +227,8 @@ class BlockChain:
         new_transaction = Transaction(sender, receiver, amount, fee, message)
         return new_transaction
 
-    def sign_transaction(self, transaction, private):
-        private_key = '-----BEGIN RSA PRIVATE KEY-----\n'
-        private_key += private
-        private_key += '\n-----END RSA PRIVATE KEY-----\n'
-        private_key_pkcs = rsa.PrivateKey.load_pkcs1(private_key.encode("utf-8"))
+    def sign_transaction(self, transaction, private_key):
+        private_key_pkcs = rsa.PrivateKey.load_pkcs1(private_key)
         transaction_str = self.transaction_to_string(transaction)
         signature = rsa.sign(transaction_str.encode("utf-8"), private_key_pkcs, "SHA-1")
         return signature
@@ -198,17 +251,11 @@ class BlockChain:
 
     def start(self):
         address, private = self.generate_address()
+        print(f"Miner address: {address}")
+        print(f"Miner private: {private}")
         self.create_genesis_block()
         while True:
-            # Step1: initialize a transaction
-            transaction = self.initialize_transaction(address, 'test123', 1, 1, 'Test')
-            if transaction:
-                # Step2: Sign your transaction
-                signature = self.sign_transaction(transaction, private)
-                # Step3: Send it to blockchain
-                self.add_transaction(transaction, signature)
             self.mine_block(address)
-            print(self.get_balance(address))
             self.adjust_difficulty()
 
 
